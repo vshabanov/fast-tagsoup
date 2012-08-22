@@ -339,7 +339,9 @@ renderTagsT = renderTags' escapeHtmlT T.concat
 
 renderTags' escape concat = go []
     where go acc [] = concat $ reverse acc
-          go acc (TagOpen t as : TagClose tc : ts) | t == tc =
+          go acc (TagOpen t as : TagClose tc : ts)
+              | t == tc && t /= "iframe" =
+                  --  browsers do not like <iframe/>
               go ("/>" : renderAtts (reverse as) (t : "<" : acc)) ts
           go acc (TagOpen t as : ts) =
               go (">" : renderAtts (reverse as) (t : "<" : acc)) ts
