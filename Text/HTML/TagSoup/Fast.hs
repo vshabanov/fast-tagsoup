@@ -142,7 +142,7 @@ parseTags s = B.inlinePerformIO $ withForeignPtr fp $ \ p ->
               | r p == ">" = tdat tag (pp p) (mm left)
               | r p == "?" || r p == "/" =
                   selfClosingStartTag tag (pp p) (mm left)
-              | r p == "'" || r p == "\"" = attValue (r p) tag "" (pp p) (mm left) 0
+--              | r p == "'" || r p == "\"" = attValue (r p) tag "" (pp p) (mm left) 0
               | otherwise = tagName o (pp p) (mm left) (pp n)
               where tag | o         = TagOpen  (toLowerBS $ mkS left n) []
                         | otherwise = TagClose (toLowerBS $ mkS left n)
@@ -157,7 +157,7 @@ parseTags s = B.inlinePerformIO $ withForeignPtr fp $ \ p ->
               | space (r p) = beforeAttName t (pp p) (mm l)
               | r p == ">" = tdat t (pp p) (mm l)
               | r p == "?" || r p == "/" = selfClosingStartTag t (pp p) (mm l)
-              | r p == "'" || r p == "\"" = attValue (r p) t "" (pp p) (mm l) 0
+--              | r p == "'" || r p == "\"" = attValue (r p) t "" (pp p) (mm l) 0
               | otherwise = attName t (pp p) (mm l) 1
           attName t p 0 n = [t]
           attName !t !p !l !n
@@ -339,10 +339,8 @@ renderTagsT = renderTags' escapeHtmlT T.concat
 
 renderTags' escape concat = go []
     where go acc [] = concat $ reverse acc
-          go acc (TagOpen t as : TagClose tc : ts)
-              | t == tc && t /= "iframe" =
-                  --  browsers do not like <iframe/>
-              go ("/>" : renderAtts (reverse as) (t : "<" : acc)) ts
+          go acc (TagOpen "br" _ : TagClose "br" : ts) =
+              go ("<br/>" : acc) ts
           go acc (TagOpen t as : ts) =
               go (">" : renderAtts (reverse as) (t : "<" : acc)) ts
           go acc (TagClose t : ts) =
