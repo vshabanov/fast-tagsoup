@@ -17,7 +17,9 @@
   'parseTagsT' and work with @[@'Tag' 'Text'@]@ to reduce memory fragmentation.
 -}
 module Text.HTML.TagSoup.Fast
-    ( parseTags, renderTags, parseTagsT, renderTagsT, ensureUtf8Xml )
+    ( parseTags, renderTags, parseTagsT, renderTagsT, ensureUtf8Xml
+    , escapeHtml, escapeHtmlT, unescapeHtml, unescapeHtmlT
+    )
     where
 
 import Text.HTML.TagSoup (Tag(..))
@@ -233,6 +235,13 @@ nextIC !p !l ((a,b):xs) = (r p == a || r p == b) && nextIC (pp p) (mm l) xs
 -- entities length are also not longer than 8
 -- so we are looking for ';' after '&' no more than 9 symbols
 
+-- | Alternative to 'unescapeHtml' working with 'Text'
+unescapeHtmlT :: T.Text -> T.Text
+unescapeHtmlT s
+    | Nothing <- T.find (== '&') s = s
+    | otherwise = bst $ unescapeHtml $ T.encodeUtf8 s
+
+-- | Convert escaped HTML to raw.
 unescapeHtml :: B.ByteString -> B.ByteString
 unescapeHtml s
     | not (B8.elem "&" s) = s
@@ -299,11 +308,13 @@ textTag (TagComment t) = TagComment (bst t)
 textTag (TagWarning t) = TagWarning (bst t)
 textTag (TagPosition r c) = TagPosition r c
 
+-- | Alternative to 'escapeHtml' working with 'Text'
 escapeHtmlT :: T.Text -> T.Text
 escapeHtmlT s
     | not $ T.any (\ c -> c=='&'||c=='<'||c=='>'||c=='\''||c=='"') s = s
     | otherwise = bst $ escapeHtml $ T.encodeUtf8 s
 
+-- | Escape characters unsafe to HTML
 escapeHtml :: B.ByteString -> B.ByteString
 escapeHtml s
     | Nothing <- B8.find (\ c -> c=="&"||c=="<"||c==">"||c=="'"||c=="\"") s = s
