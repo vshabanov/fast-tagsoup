@@ -1,3 +1,4 @@
+-- {-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE OverloadedStrings, BangPatterns, FlexibleInstances,
              ScopedTypeVariables, PatternGuards #-}
 {-|
@@ -39,7 +40,6 @@ import System.IO.Unsafe
 
 import Data.String
 import Data.Char
-import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.ICU.Convert as ICU
@@ -47,31 +47,37 @@ import qualified Control.Exception as E
 
 instance IsString Word8 where
     fromString [c] = B.c2w c
+    fromString _ = error "fromString :: Word8"
 
 type P = Ptr Word8
 r :: P -> Word8
 r ptr = B.inlinePerformIO (peek ptr)
 {-# INLINE r #-}
+ri :: P -> Int -> Word8
+ri ptr i = B.inlinePerformIO (peek (ptr `plusPtr` i))
+{-# INLINE ri #-}
 
-instance Enum (Ptr Word8) where
-    succ p = p `plusPtr` 1
-    toEnum = error "toEnum: Ptr Word8"
-    fromEnum = error "toEnum: Ptr Word8"
-pp :: Enum a => a -> a
-pp !x = succ x
+pp :: Ptr Word8 -> Ptr Word8
+pp !x = x `plusPtr` 1
+p1 :: Int -> Int
+p1 !x = succ x
+mm :: Int -> Int
 mm !y = pred y
 {-# INLINE mm #-}
 {-# INLINE pp #-}
+{-# INLINE p1 #-}
 
 -- toLowerBS = B.map toLower
 -- toLower is inplace
-toLowerBS bs@(B.PS fp o l) = B.inlinePerformIO $ withForeignPtr fp $ \ p -> do
-    let go !o 0 = return bs
-        go !o l = do
-            w <- peekByteOff p o
-            pokeByteOff p o (B.c2w $ toLower $ B.w2c w)
-            go (o+1) (l-1)
-    go o l
+toLowerBS :: B.ByteString -> B.ByteString
+toLowerBS bs@(B.PS fp offs len) =
+    B.inlinePerformIO $ withForeignPtr fp $ \ p -> do
+        let go !_ 0 = return bs
+            go !o l = do
+                w <- peekByteOff p o
+                pokeByteOff p o (B.c2w $ toLower $ B.w2c w)
+                go (o+1) (l-1)
+        go offs len
 
 -- | Parse a string to a list of tags.
 --
@@ -87,7 +93,7 @@ parseTags s = B.inlinePerformIO $ withForeignPtr fp $ \ p ->
     where (fp, offset, len) =
               B.toForeignPtr $ B.copy s -- copy due to inline toLower
           fixTag (TagOpen t a) =
-              TagOpen t (map (\(a,v) -> (toLowerBS a, unescapeHtml v)) $
+              TagOpen t (map (\(n,v) -> (toLowerBS n, unescapeHtml v)) $
                              reverse a)
 --          fixTag (TagText t) = TagText (unescapeHtml t)
           fixTag t = t
@@ -102,28 +108,45 @@ parseTags s = B.inlinePerformIO $ withForeignPtr fp $ \ p ->
               | otherwise = TagText $ mkS left n
                             -- leave script/style/CDATA as is
           script :: P -> Int -> Int -> [Tag B.ByteString]
-          script p 0 0 = []
-          script p 0 n = [mkText False 0 n]
+          script _ 0 0 = []
+          script _ 0 n = [mkText False 0 n]
           script !p !l !n
-              | nextIC p l (toLowerUpperPairs "</script>") =
+              | l >= 9 && r p == "<" && ri p 1 == "/" &&
+                (ri p 2 == "s" || ri p 2 == "S") &&
+                (ri p 3 == "c" || ri p 3 == "C") &&
+                (ri p 4 == "r" || ri p 4 == "R") &&
+                (ri p 5 == "i" || ri p 5 == "I") &&
+                (ri p 6 == "p" || ri p 6 == "P") &&
+                (ri p 7 == "t" || ri p 7 == "T") &&
+                ri p 8 == ">" =
+                  -- it seems that there is no much difference
+                  -- between nextIC and low level code
+--                nextIC p l (toLowerUpperPairs "</script>") =
                   mkText False l n : TagClose "script"
                   : dat (p `plusPtr` 9) (l - 9) 0
-              | otherwise = script (pp p) (mm l) (pp n)
+              | otherwise = script (pp p) (mm l) (p1 n)
           style :: P -> Int -> Int -> [Tag B.ByteString]
-          style p 0 0 = []
-          style p 0 n = [mkText False 0 n]
+          style _ 0 0 = []
+          style _ 0 n = [mkText False 0 n]
           style !p !l !n
-              | nextIC p l (toLowerUpperPairs "</style>") =
+              | l >= 8 && r p == "<" && ri p 1 == "/" &&
+                (ri p 2 == "s" || ri p 2 == "S") &&
+                (ri p 3 == "t" || ri p 3 == "T") &&
+                (ri p 4 == "y" || ri p 4 == "Y") &&
+                (ri p 5 == "l" || ri p 5 == "L") &&
+                (ri p 6 == "e" || ri p 6 == "E") &&
+                ri p 7 == ">" =
+--              | nextIC p l (toLowerUpperPairs "</style>") =
                   mkText False l n : TagClose "style"
                   : dat (p `plusPtr` 8) (l - 8) 0
-              | otherwise = style (pp p) (mm l) (pp n)
+              | otherwise = style (pp p) (mm l) (p1 n)
 
           dat :: P -> Int -> Int -> [Tag B.ByteString]
-          dat p 0 0 = []
-          dat p 0 n = [mkText True 0 n]
+          dat _ 0 0 = []
+          dat _ 0 n = [mkText True 0 n]
           dat !p !left !n
               | r p == "<" = mkText True left n : tagOpen (pp p) (mm left)
-              | otherwise = dat (pp p) (mm left) (pp n)
+              | otherwise = dat (pp p) (mm left) (p1 n)
           tdat !t !p !l = t : case t of
               TagOpen "script" _ -> script p l 0
               TagOpen "style" _ -> style p l 0
@@ -138,38 +161,43 @@ parseTags s = B.inlinePerformIO $ withForeignPtr fp $ \ p ->
           closeTagOpen !p !left
               | alphaBQ (r p) = tagName False (pp p) (mm left) 1
               | otherwise = dat p 0 2
-          tagName o p 0 n = [] -- ouput nothing on EOF before tag closing bracket
+          tagName _ _ 0 _ = [] -- ouput nothing on EOF before tag closing bracket
           tagName !o !p !left !n
               | space (r p) = beforeAttName tag (pp p) (mm left)
               | r p == ">" = tdat tag (pp p) (mm left)
               | r p == "?" || r p == "/" =
                   selfClosingStartTag tag (pp p) (mm left)
 --              | r p == "'" || r p == "\"" = attValue (r p) tag "" (pp p) (mm left) 0
-              | otherwise = tagName o (pp p) (mm left) (pp n)
+              | otherwise = tagName o (pp p) (mm left) (p1 n)
               where tag | o         = TagOpen  (toLowerBS $ mkS left n) []
                         | otherwise = TagClose (toLowerBS $ mkS left n)
           markupDeclOpen p 0 = dat p 0 2
           markupDeclOpen !p !l
               | alpha (r p) = tagName True (pp p) (mm l) 1
-              | next p l "--" = commentStart (p `plusPtr` 2) (l - 2) 0
-              | next p l "[CDATA[" = cdataSection (p `plusPtr` 7) (l - 7) 0
+              | r p == "-" && l >= 2 && ri p 1 == "-" -- next p l "--"
+                  = commentStart (p `plusPtr` 2) (l - 2) 0
+              | l >= 7 && r p == "[" && ri p 1 == "C" && ri p 2 == "D"
+                 && ri p 3 == "A" && ri p 4 == "T" && ri p 5 == "A"
+                 && ri p 6 == "["
+                  -- next p l "[CDATA["
+                  = cdataSection (p `plusPtr` 7) (l - 7) 0
               | otherwise = dat p l 2
-          beforeAttName t p 0 = [t]
+          beforeAttName t _ 0 = [t]
           beforeAttName !t !p !l
               | space (r p) = beforeAttName t (pp p) (mm l)
               | r p == ">" = tdat t (pp p) (mm l)
               | r p == "?" || r p == "/" = selfClosingStartTag t (pp p) (mm l)
 --              | r p == "'" || r p == "\"" = attValue (r p) t "" (pp p) (mm l) 0
               | otherwise = attName t (pp p) (mm l) 1
-          attName t p 0 n = [t]
+          attName t _ 0 _ = [t]
           attName !t !p !l !n
               | space (r p) = afterAttName t (mkS l n) (pp p) (mm l)
               | r p == ">" = tdat (addAttr t (mkS l n) "") (pp p) (mm l)
               | r p == "?" || r p == "/" =
                   selfClosingStartTag (addAttr t (mkS l n) "") (pp p) (mm l)
               | r p == "=" = beforeAttValue t (mkS l n) (pp p) (mm l)
-              | otherwise = attName t (pp p) (mm l) (pp n)
-          afterAttName t a p 0 = [t]
+              | otherwise = attName t (pp p) (mm l) (p1 n)
+          afterAttName t _ _ 0 = [t]
           afterAttName !t !a !p !l
               | space (r p) = afterAttName t a (pp p) (mm l)
               | r p == "=" = beforeAttValue t a (pp p) (mm l)
@@ -178,7 +206,7 @@ parseTags s = B.inlinePerformIO $ withForeignPtr fp $ \ p ->
                   selfClosingStartTag (addAttr t a "") (pp p) (mm l)
               | r p == "'" || r p == "\"" = attValue (r p) t a (pp p) (mm l) 0
               | otherwise = attName (addAttr t a "") (pp p) (mm l) 1
-          beforeAttValue t a p 0 = [t]
+          beforeAttValue t _ _ 0 = [t]
           beforeAttValue !t !a !p !l
               | space (r p) = beforeAttValue t a (pp p) (mm l)
               | r p == ">" = tdat (addAttr t a "") (pp p) (mm l)
@@ -187,46 +215,50 @@ parseTags s = B.inlinePerformIO $ withForeignPtr fp $ \ p ->
 --                   selfClosingStartTag (addAttr t a "") (pp p) (mm l)
               | r p == "'" || r p == "\"" = attValue (r p) t a (pp p) (mm l) 0
               | otherwise = attValueUnquoted t a (pp p) (mm l) 1
-          attValue end t a p 0 n = [t]
+          attValue _ t _ _ 0 _ = [t]
           attValue !end !t !a !p !l !n
               | r p == end = beforeAttName (addAttr t a (mkS l n)) (pp p) (mm l)
-              | otherwise = attValue end t a (pp p) (mm l) (pp n)
-          attValueUnquoted t a p 0 n = [t]
+              | otherwise = attValue end t a (pp p) (mm l) (p1 n)
+          attValueUnquoted t _ _ 0 _ = [t]
           attValueUnquoted !t !a !p !l !n
               | space (r p) = beforeAttName (addAttr t a (mkS l n)) (pp p) (mm l)
               | r p == ">" --  || r p == "/"
                   = beforeAttName (addAttr t a (mkS l n)) p l
-              | otherwise = attValueUnquoted t a (pp p) (mm l) (pp n)
-          commentStart p 0 n = [] -- we do not output comments
+              | otherwise = attValueUnquoted t a (pp p) (mm l) (p1 n)
+          commentStart _ 0 _ = [] -- we do not output comments
           commentStart !p !l !n
-              | next p l "-->" = dat (p `plusPtr` 3) (l - 3) 0
-              | otherwise = commentStart (pp p) (mm l) (pp n)
+              | l >= 3 && r p == "-" && ri p 1 == "-" && ri p 2 == ">"
+                  -- next p l "-->"
+                  = dat (p `plusPtr` 3) (l - 3) 0
+              | otherwise = commentStart (pp p) (mm l) (p1 n)
           cdataSection p 0 n = dat p 0 n
           cdataSection !p !l !n
-              | next p l "]]>" = mkText False l n : dat (p `plusPtr` 3) (l-3) 0
-              | otherwise = cdataSection (pp p) (mm l) (pp n)
-          selfClosingStartTag t p 0 = closeTag t []
+              | l >= 3 && r p == "]" && ri p 1 == "]" && ri p 2 == ">"
+                  -- next p l "]]>"
+                  = mkText False l n : dat (p `plusPtr` 3) (l-3) 0
+              | otherwise = cdataSection (pp p) (mm l) (p1 n)
+          selfClosingStartTag t _ 0 = closeTag t []
           selfClosingStartTag !t !p !l
               | r p == ">" = closeTag t $ dat (pp p) (mm l) 0
               | otherwise = beforeAttName t p l
           addAttr (TagOpen !tn !ta) !a !v = TagOpen tn ((a, v):ta)
           addAttr t _ _ = t
-          closeTag !t@(TagOpen !tn _) !r = t : TagClose tn : r
-          closeTag !t !r = t : r
+          closeTag !t@(TagOpen !tn _) !rs = t : TagClose tn : rs
+          closeTag !t !rs = t : rs
           space 0x20 = True
           space !n = n >= 9 && n <= 13 -- \t\n\v\f\r
           alpha !c = (c >= "a" && c <= "z") || (c >= "A" && c <= "Z")
           alphaBQ !c = alpha c || c == "?" || c == "!"
 
-next  p l [] = True
-next  p 0  _  = False
-next !p !l (x:xs) = (r p == B.c2w x) && next (pp p) (mm l) xs
+-- next  p l [] = True
+-- next  p 0  _  = False
+-- next !p !l (x:xs) = (r p == B.c2w x) && next (pp p) (mm l) xs
 
-toLowerUpperPairs s = [(B.c2w $ toLower x, B.c2w $ toUpper x) | x <- s]
+-- toLowerUpperPairs s = [(B.c2w $ toLower x, B.c2w $ toUpper x) | x <- s]
 
-nextIC  p l [] = True
-nextIC  p 0  _  = False
-nextIC !p !l ((a,b):xs) = (r p == a || r p == b) && nextIC (pp p) (mm l) xs
+-- nextIC  p l [] = True
+-- nextIC  p 0  _  = False
+-- nextIC !p !l ((a,b):xs) = (r p == a || r p == b) && nextIC (pp p) (mm l) xs
 
 {-# INLINE parseTags #-}
 
@@ -253,7 +285,7 @@ unescapeHtml s
                      return $ if ch then dst' `minusPtr` dst else 0
           (fp, offset, len) = B.toForeignPtr s
           go :: P -> P -> Int -> Bool -> IO (Bool, P)
-          go !s !d !0 !c = return (c, d)
+          go !_ !d !0 !c = return (c, d)
           go !s !d !l !c
 --              | r s .&. (0x8 + 0x4) == 0x8
               | r s /= "&" =
@@ -327,7 +359,7 @@ escapeHtml s
 
           (fp, offset, len) = B.toForeignPtr s
           go :: P -> P -> Int -> Bool -> IO (Bool, P)
-          go !s !d !0 !c = return (c, d)
+          go !_ !d !0 !c = return (c, d)
           go !s !d !l !c
               | r s == "&" = add s d l $ map B.c2w "&amp;"
               | r s == "<" = add s d l $ map B.c2w "&lt;"
@@ -358,13 +390,15 @@ renderTags' escape concat = go []
               go (">" : t : "</" : acc) ts
           go acc (TagText t : ts) =
               go (escape t : acc) ts
-          renderAtts [] r = r
-          renderAtts ((a,v):as) r =
-              "\"" : escape v : "=\"" : a : " " : renderAtts as r
+          go acc (_ : ts) = go acc ts -- make compiler happy
+          renderAtts [] rs = rs
+          renderAtts ((a,v):as) rs =
+              "\"" : escape v : "=\"" : a : " " : renderAtts as rs
 
 {-# INLINE renderTags #-}
 
 -- | Decode XML to UTF-8 using @encoding@ attribute of @\<?xml\>@ tag.
+ensureUtf8Xml :: B.ByteString -> B.ByteString
 ensureUtf8Xml s
     | Right _ <- T.decodeUtf8' s = s
       -- first of all we try decode utf-8.
@@ -378,10 +412,10 @@ ensureUtf8Xml s
                 unsafePerformIO $
                     (do -- print enc
                         c <- ICU.open (toString enc) Nothing
-                        let r = T.encodeUtf8 $ ICU.toUnicode c s
-                        B.length r `seq` return r)
+                        let t = T.encodeUtf8 $ ICU.toUnicode c s
+                        B.length t `seq` return t)
                     `E.catch`
-                    \ (e :: E.SomeException) -> return s
+                    \ (_ :: E.SomeException) -> return s
                       -- in case of errors try process as utf-8
 --                 TL.fromChunks $
 --                     map (ICU.toUnicode $ unsafePerformIO $

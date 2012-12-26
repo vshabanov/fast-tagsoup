@@ -1,6 +1,6 @@
 cabal-version:  >= 1.6
 name:           fast-tagsoup
-version:        1.0.3
+version:        1.0.4
 copyright:      Vladimir Shabanov 2011-2012
 author:         Vladimir Shabanov <vshabanoff@gmail.com>
 maintainer:     Vladimir Shabanov <vshabanoff@gmail.com>
@@ -42,3 +42,5 @@ library
 
     exposed-modules:
         Text.HTML.TagSoup.Fast
+
+    ghc-options: -O2
