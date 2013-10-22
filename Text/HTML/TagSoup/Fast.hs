@@ -299,13 +299,17 @@ unescapeHtml s
               | r s /= ";" =
                   entity (pp s) d (mm l) (mm n) (B.w2c (r s) : acc) c
               | otherwise = case lookupEntity $ reverse acc of
-                  Nothing ->
-                      poke d "&" >> go (s `plusPtr` (n-9)) (pp d) (l+9-n) c
-                  Just i -> do
+                  Just [i] -> do
+                      -- there are strange two character entities, some of them
+                      -- are actually single character
+                      -- (&Bfr; = '\x1D505', but returned as "\xD835\xDD05")
+                      -- ignore them.
                       let put !d [] = go (pp s) d (mm l) True
                           put !d (x:xs) =
                               poke d x >> put (pp d) xs
                       put d $ encodeChar i
+                  _ ->
+                      poke d "&" >> go (s `plusPtr` (n-9)) (pp d) (l+9-n) c
 
 encodeChar :: Char -> [Word8]
 encodeChar = map fromIntegral . go . ord
