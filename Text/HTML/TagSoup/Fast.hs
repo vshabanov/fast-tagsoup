@@ -260,8 +260,6 @@ parseTags s = B.inlinePerformIO $ withForeignPtr fp $ \ p ->
 -- nextIC  p 0  _  = False
 -- nextIC !p !l ((a,b):xs) = (r p == a || r p == b) && nextIC (pp p) (mm l) xs
 
-{-# INLINE parseTags #-}
-
 -- ord maxBound = 1114111 = 0x10FFFF = &#1114111; &#x10FFFF;
 -- maximum 8 characters between '&' and ';'
 -- entities length are also not longer than 8
@@ -377,8 +375,6 @@ escapeHtml s
               poke d x
               add s (pp d) l xs
 
-{-# INLINE unescapeHtml #-}
-
 -- | Show a list of tags, as they might have been parsed.
 renderTags = renderTags' escapeHtml B.concat
 -- | Alternative to 'renderTags' working with 'Text'
@@ -399,8 +395,6 @@ renderTags' escape concat = go []
           renderAtts ((a,v):as) rs =
               "\"" : escape v : "=\"" : a : " " : renderAtts as rs
 
-{-# INLINE renderTags #-}
-
 -- | Decode XML to UTF-8 using @encoding@ attribute of @\<?xml\>@ tag.
 ensureUtf8Xml :: B.ByteString -> B.ByteString
 ensureUtf8Xml s
@@ -408,8 +402,8 @@ ensureUtf8Xml s
       -- first of all we try decode utf-8.
       -- Some sites specify non utf-8 encoding, while the text is in utf.
     | otherwise =
-    case parseTags $ B.dropWhile isSpace s of
-        --           ^ sometimes there is a space before ?xml
+    case dropWhile isText $ parseTags s of
+        --         ^ sometimes there is a space or junk text before <?xml>
         (TagOpen "?xml" attrs : _)
             | Just enc <- lookup "encoding" attrs
             , B.map toLower enc /= "utf-8" ->
@@ -429,3 +423,5 @@ ensureUtf8Xml s
                 -- convertFuzzy works only on GNU
         _ -> s -- TL.decodeUtf8With (\ _ -> fmap B.w2c) s
              -- TL.lenientDecode s
+    where isText (TagText _) = True
+          isText _ = False
