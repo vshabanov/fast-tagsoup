@@ -1,7 +1,7 @@
 cabal-version:  >= 1.6
 name:           fast-tagsoup
-version:        1.0.6
-copyright:      Vladimir Shabanov 2011-2012
+version:        1.0.7
+copyright:      Vladimir Shabanov 2011-2015
 author:         Vladimir Shabanov <vshabanoff@gmail.com>
 maintainer:     Vladimir Shabanov <vshabanoff@gmail.com>
 homepage:       https://github.com/vshabanov/fast-tagsoup

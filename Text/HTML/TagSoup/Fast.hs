@@ -111,34 +111,30 @@ parseTags s = B.inlinePerformIO $ withForeignPtr fp $ \ p ->
           script _ 0 0 = []
           script _ 0 n = [mkText False 0 n]
           script !p !l !n
-              | l >= 9 && r p == "<" && ri p 1 == "/" &&
+              | l >= 8 && r p == "<" && ri p 1 == "/" &&
                 (ri p 2 == "s" || ri p 2 == "S") &&
                 (ri p 3 == "c" || ri p 3 == "C") &&
                 (ri p 4 == "r" || ri p 4 == "R") &&
                 (ri p 5 == "i" || ri p 5 == "I") &&
                 (ri p 6 == "p" || ri p 6 == "P") &&
-                (ri p 7 == "t" || ri p 7 == "T") &&
-                ri p 8 == ">" =
-                  -- it seems that there is no much difference
-                  -- between nextIC and low level code
---                nextIC p l (toLowerUpperPairs "</script>") =
-                  mkText False l n : TagClose "script"
-                  : dat (p `plusPtr` 9) (l - 9) 0
+                (ri p 7 == "t" || ri p 7 == "T")
+                -- it seems that there is no much difference
+                -- between nextIC and low level code
+--              | nextIC p l (toLowerUpperPairs "</script") =
+                = mkText False l n : tagName False (p `plusPtr` 8) (l - 8) 6
               | otherwise = script (pp p) (mm l) (p1 n)
           style :: P -> Int -> Int -> [Tag B.ByteString]
           style _ 0 0 = []
           style _ 0 n = [mkText False 0 n]
           style !p !l !n
-              | l >= 8 && r p == "<" && ri p 1 == "/" &&
+              | l >= 7 && r p == "<" && ri p 1 == "/" &&
                 (ri p 2 == "s" || ri p 2 == "S") &&
                 (ri p 3 == "t" || ri p 3 == "T") &&
                 (ri p 4 == "y" || ri p 4 == "Y") &&
                 (ri p 5 == "l" || ri p 5 == "L") &&
-                (ri p 6 == "e" || ri p 6 == "E") &&
-                ri p 7 == ">" =
---              | nextIC p l (toLowerUpperPairs "</style>") =
-                  mkText False l n : TagClose "style"
-                  : dat (p `plusPtr` 8) (l - 8) 0
+                (ri p 6 == "e" || ri p 6 == "E")
+--              | nextIC p l (toLowerUpperPairs "</style") =
+                = mkText False l n : tagName False (p `plusPtr` 7) (l - 7) 5
               | otherwise = style (pp p) (mm l) (p1 n)
 
           dat :: P -> Int -> Int -> [Tag B.ByteString]
@@ -161,8 +157,8 @@ parseTags s = B.inlinePerformIO $ withForeignPtr fp $ \ p ->
           closeTagOpen !p !left
               | alphaBQ (r p) = tagName False (pp p) (mm left) 1
               | otherwise = dat p 0 2
-          tagName _ _ 0 _ = [] -- ouput nothing on EOF before tag closing bracket
           tagName !o !p !left !n
+              | left == 0 = [tag] -- output tag on EOF before closing bracket
               | space (r p) = beforeAttName tag (pp p) (mm left)
               | r p == ">" = tdat tag (pp p) (mm left)
               | r p == "?" || r p == "/" =
@@ -189,16 +185,16 @@ parseTags s = B.inlinePerformIO $ withForeignPtr fp $ \ p ->
               | r p == "?" || r p == "/" = selfClosingStartTag t (pp p) (mm l)
 --              | r p == "'" || r p == "\"" = attValue (r p) t "" (pp p) (mm l) 0
               | otherwise = attName t (pp p) (mm l) 1
-          attName t _ 0 _ = [t]
           attName !t !p !l !n
+              | l == 0 = [addAttr t (mkS l n) ""] -- "<a href"
               | space (r p) = afterAttName t (mkS l n) (pp p) (mm l)
               | r p == ">" = tdat (addAttr t (mkS l n) "") (pp p) (mm l)
               | r p == "?" || r p == "/" =
                   selfClosingStartTag (addAttr t (mkS l n) "") (pp p) (mm l)
               | r p == "=" = beforeAttValue t (mkS l n) (pp p) (mm l)
               | otherwise = attName t (pp p) (mm l) (p1 n)
-          afterAttName t _ _ 0 = [t]
           afterAttName !t !a !p !l
+              | l == 0 = [addAttr t a ""] -- "<a href "
               | space (r p) = afterAttName t a (pp p) (mm l)
               | r p == "=" = beforeAttValue t a (pp p) (mm l)
               | r p == ">" = tdat (addAttr t a "") (pp p) (mm l)
@@ -206,8 +202,8 @@ parseTags s = B.inlinePerformIO $ withForeignPtr fp $ \ p ->
                   selfClosingStartTag (addAttr t a "") (pp p) (mm l)
               | r p == "'" || r p == "\"" = attValue (r p) t a (pp p) (mm l) 0
               | otherwise = attName (addAttr t a "") (pp p) (mm l) 1
-          beforeAttValue t _ _ 0 = [t]
           beforeAttValue !t !a !p !l
+              | l == 0 = [addAttr t a ""] -- "<a href=" or "<a href= "
               | space (r p) = beforeAttValue t a (pp p) (mm l)
               | r p == ">" = tdat (addAttr t a "") (pp p) (mm l)
 --               | (r p == "?" || r p == "/") &&
@@ -215,12 +211,12 @@ parseTags s = B.inlinePerformIO $ withForeignPtr fp $ \ p ->
 --                   selfClosingStartTag (addAttr t a "") (pp p) (mm l)
               | r p == "'" || r p == "\"" = attValue (r p) t a (pp p) (mm l) 0
               | otherwise = attValueUnquoted t a (pp p) (mm l) 1
-          attValue _ t _ _ 0 _ = [t]
           attValue !end !t !a !p !l !n
+              | l == 0 = [addAttr t a (mkS l n)] -- "<a href='..."
               | r p == end = beforeAttName (addAttr t a (mkS l n)) (pp p) (mm l)
               | otherwise = attValue end t a (pp p) (mm l) (p1 n)
-          attValueUnquoted t _ _ 0 _ = [t]
           attValueUnquoted !t !a !p !l !n
+              | l == 0 = [addAttr t a (mkS l n)] -- "<a href=..."
               | space (r p) = beforeAttName (addAttr t a (mkS l n)) (pp p) (mm l)
               | r p == ">" --  || r p == "/"
                   = beforeAttName (addAttr t a (mkS l n)) p l
