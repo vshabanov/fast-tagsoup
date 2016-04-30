@@ -25,6 +25,7 @@ module Text.HTML.TagSoup.Fast
 
 import Text.HTML.TagSoup (Tag(..))
 import Text.HTML.TagSoup.Entity
+import Text.HTML.TagSoup.HtmlEntities
 import Text.StringLike (StringLike(..))
 
 import qualified Data.ByteString.Char8 as B
@@ -44,6 +45,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.ICU.Convert as ICU
 import qualified Control.Exception as E
+import Control.Monad (mplus)
 
 instance IsString Word8 where
     fromString [c] = B.c2w c
@@ -51,10 +53,10 @@ instance IsString Word8 where
 
 type P = Ptr Word8
 r :: P -> Word8
-r ptr = B.inlinePerformIO (peek ptr)
+r ptr = unsafePerformIO (peek ptr)
 {-# INLINE r #-}
 ri :: P -> Int -> Word8
-ri ptr i = B.inlinePerformIO (peek (ptr `plusPtr` i))
+ri ptr i = unsafePerformIO (peek (ptr `plusPtr` i))
 {-# INLINE ri #-}
 
 pp :: Ptr Word8 -> Ptr Word8
@@ -71,7 +73,7 @@ mm !y = pred y
 -- toLower is inplace
 toLowerBS :: B.ByteString -> B.ByteString
 toLowerBS bs@(B.PS fp offs len) =
-    B.inlinePerformIO $ withForeignPtr fp $ \ p -> do
+    unsafePerformIO $ withForeignPtr fp $ \ p -> do
         let go !_ 0 = return bs
             go !o l = do
                 w <- peekByteOff p o
@@ -85,7 +87,7 @@ toLowerBS bs@(B.PS fp offs len) =
 -- >   [TagOpen "div" [],TagText "&",TagOpen "script" [],TagText "x<y",TagClose "script"]
 --
 parseTags :: B.ByteString -> [Tag B.ByteString]
-parseTags s = B.inlinePerformIO $ withForeignPtr fp $ \ p ->
+parseTags s = unsafePerformIO $ withForeignPtr fp $ \ p ->
           return $
                  map fixTag $ filter (/= TagText "") $
                  dat (p `plusPtr` offset) len 0
@@ -269,41 +271,43 @@ unescapeHtmlT s
 
 -- | Convert escaped HTML to raw.
 unescapeHtml :: B.ByteString -> B.ByteString
-unescapeHtml s
-    | not (B8.elem "&" s) = s
-    | B.length s' == 0   = s -- ignore newly created string when there is no changes
-    | otherwise          = s'
-    where s' = B.inlinePerformIO $ withForeignPtr fp $ \ src ->
+unescapeHtml src
+    | not (B8.elem "&" src) = src
+    | B.length s' == 0      = src
+      -- ignore newly created string when there is no changes
+    | otherwise             = s'
+    where s' = unsafePerformIO $ withForeignPtr fp $ \ s ->
                B.createAndTrim (len*2) $ \ dst -> do
-                     (ch, dst') <- go (src `plusPtr` offset) dst len False
+                     (ch, dst') <- go (s `plusPtr` offset) dst len False
                      return $ if ch then dst' `minusPtr` dst else 0
-          (fp, offset, len) = B.toForeignPtr s
+          (fp, offset, len) = B.toForeignPtr src
           go :: P -> P -> Int -> Bool -> IO (Bool, P)
           go !_ !d !0 !c = return (c, d)
           go !s !d !l !c
 --              | r s .&. (0x8 + 0x4) == 0x8
               | r s /= "&" =
                   poke d (r s) >> go (pp s) (pp d) (mm l) c
-              | otherwise = entity (pp s) d (mm l) 9 [] c
+              | otherwise = entity (pp s) d (mm l) maxHtmlEntityLength [] c
 --           add !c !s !d !n !l =
 --               poke d c >> go (s `plusPtr` n) (pp d) (l - n) True
           entity !s !d !l !n !acc !c
               | n == 0 || l == 0 =
-                  poke d "&" >> go (s `plusPtr` (n-9)) (pp d) (l+9-n) c
+                  poke d "&" >>
+                  go (s `plusPtr` (n-maxHtmlEntityLength))
+                     (pp d) (l+maxHtmlEntityLength-n) c
               | r s /= ";" =
                   entity (pp s) d (mm l) (mm n) (B.w2c (r s) : acc) c
-              | otherwise = case lookupEntity $ reverse acc of
-                  Just [i] -> do
-                      -- there are strange two character entities, some of them
-                      -- are actually single character
-                      -- (&Bfr; = '\x1D505', but returned as "\xD835\xDD05")
-                      -- ignore them.
+              | otherwise = case lookupHtmlEntity (reverse acc) `mplus`
+                                 lookupEntity (reverse acc) of
+                  Just e -> do
                       let put !d [] = go (pp s) d (mm l) True
                           put !d (x:xs) =
                               poke d x >> put (pp d) xs
-                      put d $ encodeChar i
+                      put d $ concatMap encodeChar e
                   _ ->
-                      poke d "&" >> go (s `plusPtr` (n-9)) (pp d) (l+9-n) c
+                      poke d "&" >>
+                      go (s `plusPtr` (n-maxHtmlEntityLength))
+                         (pp d) (l+maxHtmlEntityLength-n) c
 
 encodeChar :: Char -> [Word8]
 encodeChar = map fromIntegral . go . ord
@@ -350,7 +354,7 @@ escapeHtml s
     | Nothing <- B8.find (\ c -> c=="&"||c=="<"||c==">"||c=="'"||c=="\"") s = s
     | B.length s' == 0 = s
     | otherwise        = s'
-    where s' = B.inlinePerformIO $ withForeignPtr fp $ \ src ->
+    where s' = unsafePerformIO $ withForeignPtr fp $ \ src ->
                B.createAndTrim (len*6) $ \ dst -> do
                      (ch, dst') <- go (src `plusPtr` offset) dst len False
                      return $ if ch then dst' `minusPtr` dst else 0
@@ -372,8 +376,11 @@ escapeHtml s
               add s (pp d) l xs
 
 -- | Show a list of tags, as they might have been parsed.
+renderTags :: [Tag B.ByteString] -> B.ByteString
 renderTags = renderTags' escapeHtml B.concat
+
 -- | Alternative to 'renderTags' working with 'Text'
+renderTagsT :: [Tag T.Text] -> T.Text
 renderTagsT = renderTags' escapeHtmlT T.concat
 
 renderTags' escape concat = go []

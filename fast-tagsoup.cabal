@@ -1,7 +1,7 @@
-cabal-version:  >= 1.6
+cabal-version:  >= 1.7
 name:           fast-tagsoup
 version:        1.0.7
-copyright:      Vladimir Shabanov 2011-2015
+copyright:      Vladimir Shabanov 2011-2016
 author:         Vladimir Shabanov <vshabanoff@gmail.com>
 maintainer:     Vladimir Shabanov <vshabanoff@gmail.com>
 homepage:       https://github.com/vshabanov/fast-tagsoup
@@ -34,7 +34,7 @@ source-repository head
 --     description: Build with Encoding module
 
 library
-    build-depends: base == 4.*, bytestring, text, text-icu, tagsoup
+    build-depends: base == 4.*, bytestring, text, text-icu, tagsoup, containers
 
 --     if flag(download)
 --         build-depends: network
