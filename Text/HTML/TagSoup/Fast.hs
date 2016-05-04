@@ -265,15 +265,22 @@ decimal c
 
 -- ord maxBound = 1114111 = 0x10FFFF = &#1114111; &#x10FFFF;
 -- &
---  #
---   X or x --> 1+ hex digits, as result becomes more than maxBound
---              result will be 0xFFFD -- replacement character
---              any non hex digits means end, ';' at the end must be ignored
---   otherwise --> 1+ of decimal digits, same maxBound and ';' logic
---  alpha
---   up to 32 (or 31?) alphanum characters
---     lookup no ';' entities -- exit if found, ignoring ';'
---     finish on non alphanum, and lookup entity if it ';'
+--   # (X or x) hexDigit
+--     any number of hex digits
+--       if result accumulator becomes more than (maxBound :: Char)
+--       further characters are skipped
+--       and result become 0xFFFD -- replacement character
+--
+--       any non hex digits means end, ';' at the end must be ignored
+--   # decimalDigit
+--     any number of decimal digits
+--       same maxBound and ';' logic
+--   alpha
+--     up to (maxHtmlEntityLength-1) alphanum characters
+--       lookup entities without trailing ';' -- exit if found, ignoring ';'
+--
+--       finish on non alphanum, and lookup entity with trailng ';'
+--       if finished on ';'
 
 -- | Alternative to 'unescapeHtml' working with 'Text'
 unescapeHtmlT :: T.Text -> T.Text
