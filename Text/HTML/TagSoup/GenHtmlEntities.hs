@@ -22,14 +22,15 @@ w3cEntities = do
             map c $ V.toList a
         c (JSON.Number i) = toEnum $ truncate i
         strip (n, x) =
-            (T.dropWhileEnd (== ';') $ T.dropWhile (== '&') n, x)
+            (-- T.dropWhileEnd (== ';') $
+             T.dropWhile (== '&') n, x)
         check a b
             | a /= b = error $ show (a, b)
             | otherwise = a
         entities =
             sortBy (comparing $ \ (x,_) -> (T.toLower x, x)) $
-            HM.toList $ HM.fromListWith check $ map strip $
-            HM.toList $ HM.map e o
+            -- HM.toList $ HM.fromListWith check $
+            map strip $ HM.toList $ HM.map e o
         needEscape =
             -- Haskell doesn't like these symbols unescaped
             [ "\\", "\"", "\n", "\t"
@@ -66,3 +67,40 @@ w3cEntities = do
     -- become 6 characters when encoded in UTF-8 but
     -- unescapeHtml reserves 2x space (10 bytes for "&nGt;")
     -- so it's safe
+
+import Text.HTML.TagSoup.Fast
+testUnescapeHtml :: IO ()
+testUnescapeHtml = sequence_ tests >> putStrLn "OK"
+    where tests =
+              [t "&" "&"
+              ,t "&&" "&&"
+              ,t "&a" "&a"
+              ,t "&am" "&am"
+              ,t "&amp" "&"
+              ,t "&amp1" "&1"
+              ,t "&#" "&#"
+              ,t "&#1" "\1"
+              ,t "&&#1&am" "&\1&am"
+              ,t "&&#1;&amp" "&\1&"
+              ,t "&#amp" "&#amp"
+              ,t "&#x1d505" "𝔅"
+              ,t "&#1d505" "\1d505"
+              ,t "&#1;d505" "\1d505"
+              ,t "&#1114111" "\1114111"
+              ,t "&#1114112" "\xFFFD"
+              ,t "&#x10FFFF" "\x10FFFF"
+              ,t "&#x110000" "\xFFFD"
+              ,t "&#x1100001234567890z" "\xFFFDz"
+              ,t "&#x1100001234567890;z" "\xFFFDz"
+              ,t "rock&amproll &microm" "rock&roll µm"
+              ,t "rock&amp;roll &micro;m" "rock&roll µm"
+              ,t "&vsubnE;&CounterClockwiseContourIntegral;&aacute" "⫋︀∳á"
+              ,t (T.pack $ concat ["a&" ++ e
+                                  |(e,x) <- htmlEntities, last e /= ';'])
+                 (T.pack $ concat ["a"++x
+                                  |(e,x) <- htmlEntities, last e /= ';'])
+
+              ]
+          t a b
+              | unescapeHtmlT a == b = return ()
+              | otherwise = fail $ show (a, unescapeHtmlT a, b)

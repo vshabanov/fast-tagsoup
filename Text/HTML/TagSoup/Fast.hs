@@ -24,7 +24,6 @@ module Text.HTML.TagSoup.Fast
     where
 
 import Text.HTML.TagSoup (Tag(..))
-import Text.HTML.TagSoup.Entity
 import Text.HTML.TagSoup.HtmlEntities
 import Text.StringLike (StringLike(..))
 
@@ -45,7 +44,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.ICU.Convert as ICU
 import qualified Control.Exception as E
-import Control.Monad (mplus)
+import qualified Data.Map as Map
 
 instance IsString Word8 where
     fromString [c] = B.c2w c
@@ -61,12 +60,18 @@ ri ptr i = unsafePerformIO (peek (ptr `plusPtr` i))
 
 pp :: Ptr Word8 -> Ptr Word8
 pp !x = x `plusPtr` 1
+pp2 :: Ptr Word8 -> Ptr Word8
+pp2 !x = x `plusPtr` 2
+pp3 :: Ptr Word8 -> Ptr Word8
+pp3 !x = x `plusPtr` 3
 p1 :: Int -> Int
 p1 !x = succ x
 mm :: Int -> Int
 mm !y = pred y
 {-# INLINE mm #-}
 {-# INLINE pp #-}
+{-# INLINE pp2 #-}
+{-# INLINE pp3 #-}
 {-# INLINE p1 #-}
 
 -- toLowerBS = B.map toLower
@@ -245,23 +250,30 @@ parseTags s = unsafePerformIO $ withForeignPtr fp $ \ p ->
           closeTag !t !rs = t : rs
           space 0x20 = True
           space !n = n >= 9 && n <= 13 -- \t\n\v\f\r
-          alpha !c = (c >= "a" && c <= "z") || (c >= "A" && c <= "Z")
           alphaBQ !c = alpha c || c == "?" || c == "!"
 
--- next  p l [] = True
--- next  p 0  _  = False
--- next !p !l (x:xs) = (r p == B.c2w x) && next (pp p) (mm l) xs
-
--- toLowerUpperPairs s = [(B.c2w $ toLower x, B.c2w $ toUpper x) | x <- s]
-
--- nextIC  p l [] = True
--- nextIC  p 0  _  = False
--- nextIC !p !l ((a,b):xs) = (r p == a || r p == b) && nextIC (pp p) (mm l) xs
+alpha c = (c >= "a" && c <= "z") || (c >= "A" && c <= "Z")
+alphaNum c = alpha c || (c >= "0" && c <= "9")
+hex c
+    | c >= "0" && c <= "9" = Just $ fromEnum (c - "0")
+    | c >= "a" && c <= "f" = Just $ fromEnum (c - "a" + 10)
+    | c >= "A" && c <= "F" = Just $ fromEnum (c - "A" + 10)
+    | otherwise = Nothing
+decimal c
+    | c >= "0" && c <= "9" = Just $ fromEnum (c - "0")
+    | otherwise = Nothing
 
 -- ord maxBound = 1114111 = 0x10FFFF = &#1114111; &#x10FFFF;
--- maximum 8 characters between '&' and ';'
--- entities length are also not longer than 8
--- so we are looking for ';' after '&' no more than 9 symbols
+-- &
+--  #
+--   X or x --> 1+ hex digits, as result becomes more than maxBound
+--              result will be 0xFFFD -- replacement character
+--              any non hex digits means end, ';' at the end must be ignored
+--   otherwise --> 1+ of decimal digits, same maxBound and ';' logic
+--  alpha
+--   up to 32 (or 31?) alphanum characters
+--     lookup no ';' entities -- exit if found, ignoring ';'
+--     finish on non alphanum, and lookup entity if it ';'
 
 -- | Alternative to 'unescapeHtml' working with 'Text'
 unescapeHtmlT :: T.Text -> T.Text
@@ -284,30 +296,91 @@ unescapeHtml src
           go :: P -> P -> Int -> Bool -> IO (Bool, P)
           go !_ !d !0 !c = return (c, d)
           go !s !d !l !c
---              | r s .&. (0x8 + 0x4) == 0x8
               | r s /= "&" =
                   poke d (r s) >> go (pp s) (pp d) (mm l) c
-              | otherwise = entity (pp s) d (mm l) maxHtmlEntityLength [] c
---           add !c !s !d !n !l =
---               poke d c >> go (s `plusPtr` n) (pp d) (l - n) True
+              | otherwise = entityStart (pp s) d (mm l) c
+          entityStart !s !d !l !c
+              | l == 0 = poke d "&" >> return (c, pp d)
+              | r s == "#" && l >= 3 && (r (pp s) == "x" || r (pp s) == "X")
+              , Just x <- hex (r $ pp2 s) =
+                  baseEntity hex 16 (pp3 s) d (l-3) x
+              | r s == "#" && l >= 2
+              , Just x <- decimal (r $ pp s) =
+                  baseEntity decimal 10 (pp2 s) d (l-2) x
+              | alpha (r s) =
+                  entity (pp s) d (mm l) (maxHtmlEntityLength-1) [r s] c
+              | otherwise = poke d "&" >> go s (pp d) l c
+          baseEntity char base !s !d !l !acc
+              | l == 0 = putChar d acc $ \ d' -> return (True, d')
+              | Just x <- char (r s)
+              , acc' <- acc*base + x =
+                  if acc' > ord maxBound then
+                      overflowBaseEntity char (pp s) d (mm l)
+                  else
+                      baseEntity char base (pp s) d (mm l) acc'
+              | otherwise = putChar d acc $ \ d' -> skipSemicolon s d' l True
+          overflowBaseEntity char !s !d !l
+              | l == 0 = putChar d overflowChar $ \ d' -> return (True, d')
+              | Just _ <- char (r s) =
+                  overflowBaseEntity char (pp s) d (mm l)
+              | otherwise =
+                  putChar d overflowChar $ \ d' -> skipSemicolon s d' l True
+          overflowChar = ord '\xFFFD'
+          -- Chrome/Safari/FF use this as replace character for entities
+          -- that are too large.
+          putChar d acc next = do
+              let put !d [] = next d
+                  put !d (x:xs) =
+                      poke d x >> put (pp d) xs
+              put d $ encodeChar $ chr acc
+          skipSemicolon !s !d !l !c
+              | l == 0 = return (c, d)
+              | r s == ";" = go (pp s) d (mm l) True
+              | otherwise = go s d l c
           entity !s !d !l !n !acc !c
               | n == 0 || l == 0 =
-                  poke d "&" >>
-                  go (s `plusPtr` (n-maxHtmlEntityLength))
-                     (pp d) (l+maxHtmlEntityLength-n) c
-              | r s /= ";" =
-                  entity (pp s) d (mm l) (mm n) (B.w2c (r s) : acc) c
-              | otherwise = case lookupHtmlEntity (reverse acc) `mplus`
-                                 lookupEntity (reverse acc) of
-                  Just e -> do
-                      let put !d [] = go (pp s) d (mm l) True
-                          put !d (x:xs) =
-                              poke d x >> put (pp d) xs
-                      put d $ concatMap encodeChar e
-                  _ ->
-                      poke d "&" >>
-                      go (s `plusPtr` (n-maxHtmlEntityLength))
-                         (pp d) (l+maxHtmlEntityLength-n) c
+                  notEntity
+              | alphaNum (r s)
+              , n >= maxHtmlEntityLength - maxNoSemicolonHtmlEntityLength
+              , Just e <- lookupNoSemicolonHtmlEntityRev (r s : acc) =
+                  putEntity skipSemicolon e
+                  -- Entities without semicolon have at least 2 characters,
+                  -- so it's OK to check them starting on the 2nd character
+                  -- (first one is already in `acc` on first call to `entity`).
+                  -- And we need to check them before putting to `acc`
+                  -- since such entity is complete no matter what characters
+                  -- (ot maybe EOF) is coming later.
+              | alphaNum (r s) =
+                  entity (pp s) d (mm l) (mm n) (r s : acc) c
+              | r s == ";"
+              , Just e <- lookupSemicolonHtmlEntityRev acc =
+                  -- all these entities require ';'.
+                  -- entities that do not are already checked so it's safe
+                  -- to go to notEntity if there is not ';' at the end
+                  putEntity go e
+              | otherwise =
+                  notEntity
+              where putEntity next e = do
+                        let put !d [] = next (pp s) d (mm l) True
+                            put !d (x:xs) =
+                                poke d x >> put (pp d) xs
+                        put d e
+                    notEntity =
+                        poke d "&" >>
+                        go (s `plusPtr` (n-maxHtmlEntityLength))
+                           (pp d) (l+maxHtmlEntityLength-n) c
+
+lookupNoSemicolonHtmlEntityRev :: [Word8] -> Maybe [Word8]
+lookupNoSemicolonHtmlEntityRev = \x -> Map.lookup x mp
+    where mp = Map.fromList [ (map B.c2w $ reverse e
+                              ,concatMap encodeChar x)
+                            | (e,x) <- htmlEntities, last e /= ';']
+
+lookupSemicolonHtmlEntityRev :: [Word8] -> Maybe [Word8]
+lookupSemicolonHtmlEntityRev = \x -> Map.lookup x mp
+    where mp = Map.fromList [ (map B.c2w $ tail $ reverse e
+                              ,concatMap encodeChar x)
+                            | (e,x) <- htmlEntities, last e == ';']
 
 encodeChar :: Char -> [Word8]
 encodeChar = map fromIntegral . go . ord
