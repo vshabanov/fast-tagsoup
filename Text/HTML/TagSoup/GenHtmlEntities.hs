@@ -86,10 +86,10 @@ w3cEntities = do
 --             "\"" ++ concatMap (printf "\\x%04X") x ++ "\""
             --  ^ for TagSoup patch
             (if x `elem` needEscape then
-                 show x ++ " -- escaped (lexical error otherwise)"
+                 show x -- ++ " -- escaped"
              else
                  "\"" ++ x ++ "\"" ++
-                 (if length x > 1 then " -- two characters " ++ show x else ""))
+                 (if length x > 1 then " -- " ++ show x else ""))
     print ("max entity length", maximum $ map (T.length . fst) entities)
     print ("max result characters", maximum $ map (length . snd) entities)
     print
