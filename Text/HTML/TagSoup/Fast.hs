@@ -482,6 +482,8 @@ renderTags' escape concat = go []
               go (escape t : acc) ts
           go acc (_ : ts) = go acc ts -- make compiler happy
           renderAtts [] rs = rs
+          renderAtts ((a,""):as) rs =
+              a : " " : renderAtts as rs
           renderAtts ((a,v):as) rs =
               "\"" : escape v : "=\"" : a : " " : renderAtts as rs
 
