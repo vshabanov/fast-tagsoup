@@ -21,8 +21,8 @@ minHtmlEntityLength :: Int -- = 2
 minHtmlEntityLength = minimum $ map (length . fst) htmlEntities
 
 -- generated using Text.HTML.TagSoup.GenHtmlEntities.w3cEntities
--- Some entities are escaped since there will be lexical error otherwise.
--- Two character entities have comments with those character codes.
+-- Some entities are escaped since there will be a lexical error otherwise.
+-- Two-character entities have comments with character codes.
 htmlEntities :: [(String, String)]
 htmlEntities = let (*) = (,) in
     ["Aacute;" * "Á"
