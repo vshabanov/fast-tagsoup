@@ -60,7 +60,7 @@ w3cEntities = do
 
     let entities =
             sortBy (comparing $ \ (e,_) -> HM.lookup e tsOrder) $
---            entitiesOrderedAsIs
+            entitiesOrderedAsIs
         tsOrder = HM.fromList $ zip (map (T.pack . fst) htmlEntities) [0..]
         needEscape =
             -- Haskell doesn't like these symbols unescaped
