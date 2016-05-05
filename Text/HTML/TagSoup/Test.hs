@@ -16,13 +16,10 @@ a === b = if a == b then pass else fail $ "Does not equal: " ++ show a ++ " =/= 
 
 parseTests :: Test ()
 parseTests = do
---    parseTags "<!DOCTYPE TEST>" === [TagOpen "!DOCTYPE" [("TEST","")]]
-    parseTags "<!DOCTYPE TEST>" === [TagOpen "doctype" [("test","")]]
-    -- lower case, should I add '!' to 'doctype' ?
+    parseTags "<!DOCTYPE TEST>" === [TagOpen "!doctype" [("test","")]]
+    -- lower case
     parseTags "<test \"foo bar\">" === [TagOpen "test" [("\"foo",""),("bar\"","")]]
---    parseTags "<test baz \"foo\">" === [TagOpen "test" [("baz",""),("\"foo\"","")]]
-    -- FIXME
-    parseTags "<test baz \"foo\">" === [TagOpen "test" [("baz","foo")]] -- ????
+    parseTags "<test baz \"foo\">" === [TagOpen "test" [("baz",""),("\"foo\"","")]]
     parseTags "<test 'foo bar'>" === [TagOpen "test" [("'foo",""),("bar'","")]]
     parseTags "<test bar=''' />" === [TagOpen "test" [("bar",""),("'","")], TagClose "test"]
     parseTags "<test2 a b>" === [TagOpen "test2" [("a",""),("b","")]]
@@ -53,7 +50,10 @@ parseTests = do
 --    parseTags "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\" \"http://www.w3.org/TR/html4/strict.dtd\">" ===
 --        [TagOpen "!DOCTYPE" [("HTML",""),("PUBLIC",""),("","-//W3C//DTD HTML 4.01//EN"),("","http://www.w3.org/TR/html4/strict.dtd")]]
 --        [TagOpen "doctype" [("html",""),("public",""),("","-//W3C//DTD HTML 4.01//EN"),("","http://www.w3.org/TR/html4/strict.dtd")]]
---  FIXME
+--  FIXME??
+--  need additional states
+    parseTags "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">" === [TagOpen "!doctype" [("html",""),("public",""),("\"-",""),("w3c",""),("dtd",""),("xhtml",""),("1.0",""),("transitional",""),("en\"",""),("\"http:",""),("www.w3.org",""),("tr",""),("xhtml1",""),("dtd",""),("xhtml1-transitional.dtd\"","")]]
+    -- we don't treat !DOCTYPE as any special tag
 
     parseTags "<script src=\"http://edge.jobthread.com/feeds/jobroll/?s_user_id=100540&subtype=slashdot\">" ===
         [TagOpen "script" [("src","http://edge.jobthread.com/feeds/jobroll/?s_user_id=100540&subtype=slashdot")]]

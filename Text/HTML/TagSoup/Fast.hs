@@ -106,6 +106,7 @@ parseTags s = unsafePerformIO $ withForeignPtr fp $ \ p ->
           fixTag t = t
           -- The right way is here
           -- http://www.w3.org/TR/html5/tokenization.html
+          -- https://dev.w3.org/html5/spec-preview/tokenization.html
           -- and it is what tagsoup package tries to do.
           -- I've simplified part of states (especially comments
           -- which are stripped from ouput)
@@ -176,7 +177,7 @@ parseTags s = unsafePerformIO $ withForeignPtr fp $ \ p ->
                         | otherwise = TagClose (toLowerBS $ mkS left n)
           markupDeclOpen p 0 = dat p 0 2
           markupDeclOpen !p !l
-              | alpha (r p) = tagName True (pp p) (mm l) 1
+              | alpha (r p) = tagName True (pp p) (mm l) 2
               | r p == "-" && l >= 2 && ri p 1 == "-" -- next p l "--"
                   = commentStart (p `plusPtr` 2) (l - 2) 0
               | l >= 7 && r p == "[" && ri p 1 == "C" && ri p 2 == "D"
@@ -190,7 +191,6 @@ parseTags s = unsafePerformIO $ withForeignPtr fp $ \ p ->
               | space (r p) = beforeAttName t (pp p) (mm l)
               | r p == ">" = tdat t (pp p) (mm l)
               | r p == "?" || r p == "/" = selfClosingStartTag t (pp p) (mm l)
---              | r p == "'" || r p == "\"" = attValue (r p) t "" (pp p) (mm l) 0
               | otherwise = attName t (pp p) (mm l) 1
           attName !t !p !l !n
               | l == 0 = [addAttr t (mkS l n) ""] -- "<a href"
@@ -207,7 +207,6 @@ parseTags s = unsafePerformIO $ withForeignPtr fp $ \ p ->
               | r p == ">" = tdat (addAttr t a "") (pp p) (mm l)
               | r p == "?" || r p == "/" =
                   selfClosingStartTag (addAttr t a "") (pp p) (mm l)
-              | r p == "'" || r p == "\"" = attValue (r p) t a (pp p) (mm l) 0
               | otherwise = attName (addAttr t a "") (pp p) (mm l) 1
           beforeAttValue !t !a !p !l
               | l == 0 = [addAttr t a ""] -- "<a href=" or "<a href= "
@@ -246,7 +245,15 @@ parseTags s = unsafePerformIO $ withForeignPtr fp $ \ p ->
               | otherwise = beforeAttName t p l
           addAttr (TagOpen !tn !ta) !a !v = TagOpen tn ((a, v):ta)
           addAttr t _ _ = t
-          closeTag !t@(TagOpen !tn _) !rs = t : TagClose tn : rs
+          closeTag !t@(TagOpen !tn _) !rs
+              -- B.length tn > 1 && B.head tn == '?' = t rs
+              -- better to make separate parsing for <?xml ...> tag
+              -- Chrome just skips from "<?" to ">"
+              -- <?anything asdf="qwer>zxcv"?> becomes zxcv"?>
+              -- it conforms to spec
+              -- https://dev.w3.org/html5/spec-preview/tokenization.html#bogus-comment-state
+              -- but we use ?xml as a tag and look for encoding parameter
+              = t : TagClose tn : rs
           closeTag !t !rs = t : rs
           space 0x20 = True
           space !n = n >= 9 && n <= 13 -- \t\n\v\f\r
