@@ -59,7 +59,7 @@ w3cEntities = do
         fail "Different order?"
 
     let entities =
-            sortBy (comparing $ \ (e,_) -> HM.lookup e tsOrder) $
+--            sortBy (comparing $ \ (e,_) -> HM.lookup e tsOrder) $
             entitiesOrderedAsIs
         tsOrder = HM.fromList $ zip (map (T.pack . fst) htmlEntities) [0..]
         needEscape =
@@ -83,13 +83,13 @@ w3cEntities = do
             ]
     forM_ entities $ \ (n, x) ->
         putStrLn $ "    ,\"" ++ T.unpack n ++ "\" * " ++
-             "\"" ++ concatMap (printf "\\x%04X") x ++ "\""
+--             "\"" ++ concatMap (printf "\\x%04X") x ++ "\""
             --  ^ for TagSoup patch
---             (if x `elem` needEscape then
---                  show x ++ " -- escaped "
---              else
---                  "\"" ++ x ++ "\"" ++
---                  (if length x > 1 then " -- " ++ show x else ""))
+            (if x `elem` needEscape then
+                 show x ++ " -- escaped (lexical error otherwise)"
+             else
+                 "\"" ++ x ++ "\"" ++
+                 (if length x > 1 then " -- two characters " ++ show x else ""))
     print ("max entity length", maximum $ map (T.length . fst) entities)
     print ("max result characters", maximum $ map (length . snd) entities)
     print
