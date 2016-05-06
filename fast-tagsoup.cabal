@@ -1,6 +1,6 @@
 cabal-version:  >= 1.6
 name:           fast-tagsoup
-version:        1.0.11
+version:        1.0.12
 copyright:      Vladimir Shabanov 2011-2016
 author:         Vladimir Shabanov <vshabanoff@gmail.com>
 maintainer:     Vladimir Shabanov <vshabanoff@gmail.com>
@@ -29,21 +29,11 @@ source-repository head
     type:     git
     location: https://github.com/vshabanov/fast-tagsoup
 
--- flag encoding
---     default: False
---     description: Build with Encoding module
-
 library
-    build-depends: base == 4.*, bytestring, text, text-icu, tagsoup, containers
-
---     if flag(download)
---         build-depends: network
---         exposed-modules: Text.HTML.Download
+    build-depends:
+        base == 4.*, bytestring, text, text-icu, tagsoup >= 0.13.10, containers
 
     exposed-modules:
         Text.HTML.TagSoup.Fast
-
-    other-modules:
-        Text.HTML.TagSoup.HtmlEntities
 
     ghc-options: -O2

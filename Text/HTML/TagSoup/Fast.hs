@@ -24,7 +24,7 @@ module Text.HTML.TagSoup.Fast
     where
 
 import Text.HTML.TagSoup (Tag(..))
-import Text.HTML.TagSoup.HtmlEntities
+import Text.HTML.TagSoup.Entity (htmlEntities)
 import Text.StringLike (StringLike(..))
 
 import qualified Data.ByteString.Char8 as B
@@ -259,8 +259,10 @@ parseTags s = unsafePerformIO $ withForeignPtr fp $ \ p ->
           space !n = n >= 9 && n <= 13 -- \t\n\v\f\r
           alphaBQ !c = alpha c || c == "?" || c == "!"
 
+alpha, alphaNum :: Word8 -> Bool
 alpha c = (c >= "a" && c <= "z") || (c >= "A" && c <= "Z")
 alphaNum c = alpha c || (c >= "0" && c <= "9")
+hex, decimal :: Word8 -> Maybe Int
 hex c
     | c >= "0" && c <= "9" = Just $ fromEnum (c - "0")
     | c >= "a" && c <= "f" = Just $ fromEnum (c - "a" + 10)
@@ -396,6 +398,16 @@ lookupSemicolonHtmlEntityRev = \x -> Map.lookup x mp
                               ,concatMap encodeChar x)
                             | (e,x) <- htmlEntities, last e == ';']
 
+maxHtmlEntityLength :: Int -- = 32
+maxHtmlEntityLength = maximum $ map (length . fst) htmlEntities
+
+maxNoSemicolonHtmlEntityLength :: Int -- = 6
+maxNoSemicolonHtmlEntityLength =
+    maximum [length e | (e,_) <- htmlEntities, last e /= ';']
+
+-- minHtmlEntityLength :: Int -- = 2
+-- minHtmlEntityLength = minimum $ map (length . fst) htmlEntities
+
 encodeChar :: Char -> [Word8]
 encodeChar = map fromIntegral . go . ord
  where
@@ -416,12 +428,14 @@ encodeChar = map fromIntegral . go . ord
                         , 0x80 + oc .&. 0x3f
                         ]
 
+bst :: B.ByteString -> T.Text
 bst = T.decodeUtf8With (\ _ -> fmap B.w2c)
 
 -- | Alternative to 'parseTags' working with 'Text'
 parseTagsT :: B.ByteString -> [Tag T.Text]
 parseTagsT = map textTag . parseTags
 
+textTag :: Tag B.ByteString -> Tag T.Text
 textTag (TagOpen t a) = TagOpen (bst t) [(bst n, bst v) | (n,v) <- a]
 textTag (TagClose t) = TagClose (bst t)
 textTag (TagText t) = TagText (bst t)
@@ -470,6 +484,7 @@ renderTags = renderTags' escapeHtml B.concat
 renderTagsT :: [Tag T.Text] -> T.Text
 renderTagsT = renderTags' escapeHtmlT T.concat
 
+renderTags' :: (Eq a, IsString a) => (a -> a) -> ([a] -> t) -> [Tag a] -> t
 renderTags' escape concat = go []
     where go acc [] = concat $ reverse acc
           go acc (TagOpen "br" _ : TagClose "br" : ts) =
