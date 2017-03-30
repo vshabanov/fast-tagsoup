@@ -1,6 +1,6 @@
 import Text.HTML.TagSoup hiding (parseTags, renderTags)
 import Text.HTML.TagSoup.Fast
-import Text.HTML.TagSoup.HtmlEntities
+import Text.HTML.TagSoup.Entity
 import qualified Data.Text as T
 
 type Test a = IO a
@@ -79,6 +79,8 @@ parseTests = do
     -- lower case
     parseTags "<SCRIPT language=foo> if (x<bomb) </SCRIPT>" === [TagOpen "script" [("language","foo")], TagText " if (x<bomb) ", TagClose "script"]
     parseTags "<script /><test>" === [TagOpen "script" [], TagClose "script", TagOpen "test" []]
+
+    renderTags [TagOpen "script" [], TagText "print('<p>')", TagClose "script"] === "<script>print('<p>')</script>"
 
     -- some escapes require trailing semicolons, see #28 and #27.
     parseTagsT "one &mid; two" === [TagText "one \8739 two"]

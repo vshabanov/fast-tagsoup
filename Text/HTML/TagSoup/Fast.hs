@@ -104,6 +104,10 @@ parseTags s = unsafePerformIO $ withForeignPtr fp $ \ p ->
                              reverse a)
 --          fixTag (TagText t) = TagText (unescapeHtml t)
           fixTag t = t
+          -- https://dev.w3.org/html5/spec-preview/tokenization.html#tokenizing-character-references
+          -- TODO: more correct character reference tokenization
+          -- there are additional rules for attributes too.
+
           -- The right way is here
           -- http://www.w3.org/TR/html5/tokenization.html
           -- https://dev.w3.org/html5/spec-preview/tokenization.html
@@ -490,12 +494,16 @@ renderTags' escape concat = go []
           go acc (TagOpen "br" _ : TagClose "br" : ts) =
               go ("<br/>" : acc) ts
           go acc (TagOpen t as : ts) =
-              go (">" : renderAtts (reverse as) (t : "<" : acc)) ts
+              (if t == "script" || t == "style" then goUnescaped else go)
+              (">" : renderAtts (reverse as) (t : "<" : acc)) ts
           go acc (TagClose t : ts) =
               go (">" : t : "</" : acc) ts
           go acc (TagText t : ts) =
               go (escape t : acc) ts
           go acc (_ : ts) = go acc ts -- make compiler happy
+          goUnescaped acc (TagText t : ts) =
+              go (t : acc) ts
+          goUnescaped acc ts = go acc ts
           renderAtts [] rs = rs
           renderAtts ((a,""):as) rs =
               a : " " : renderAtts as rs
