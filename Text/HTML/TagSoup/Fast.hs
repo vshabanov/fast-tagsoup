@@ -177,8 +177,11 @@ parseTags s = unsafePerformIO $ withForeignPtr fp $ \ p ->
                   selfClosingStartTag tag (pp p) (mm left)
 --              | r p == "'" || r p == "\"" = attValue (r p) tag "" (pp p) (mm left) 0
               | otherwise = tagName o (pp p) (mm left) (p1 n)
-              where tag | o         = TagOpen  (toLowerBS $ mkS left n) []
-                        | otherwise = TagClose (toLowerBS $ mkS left n)
+              where tag | o || tn == "br" = TagOpen  tn []
+                          -- </br> is an error in HTML5
+                          -- but browsers treat it as <br>
+                        | otherwise       = TagClose tn
+                    tn = toLowerBS $ mkS left n
           markupDeclOpen p 0 = dat p 0 2
           markupDeclOpen !p !l
               | alpha (r p) = tagName True (pp p) (mm l) 2
@@ -257,7 +260,15 @@ parseTags s = unsafePerformIO $ withForeignPtr fp $ \ p ->
               -- it conforms to spec
               -- https://dev.w3.org/html5/spec-preview/tokenization.html#bogus-comment-state
               -- but we use ?xml as a tag and look for encoding parameter
-              = t : TagClose tn : rs
+              | tn == "br" = t : rs
+                -- there is no </br> in HTML,
+                -- <br/> is <br>, not <br></br>
+                -- <br></br> are processed as two <br>
+                -- There are more void elements that do not have
+                -- closing tag like <img>, <hr>
+                -- (http://w3c.github.io/html/syntax.html#void-elements)
+                -- but they're just ignored by browsers so we leave them as is.
+              | otherwise  = t : TagClose tn : rs
           closeTag !t !rs = t : rs
           space 0x20 = True
           space !n = n >= 9 && n <= 13 -- \t\n\v\f\r
@@ -491,8 +502,6 @@ renderTagsT = renderTags' escapeHtmlT T.concat
 renderTags' :: (Eq a, IsString a) => (a -> a) -> ([a] -> t) -> [Tag a] -> t
 renderTags' escape concat = go []
     where go acc [] = concat $ reverse acc
-          go acc (TagOpen "br" _ : TagClose "br" : ts) =
-              go ("<br/>" : acc) ts
           go acc (TagOpen t as : ts) =
               (if t == "script" || t == "style" then goUnescaped else go)
               (">" : renderAtts (reverse as) (t : "<" : acc)) ts
